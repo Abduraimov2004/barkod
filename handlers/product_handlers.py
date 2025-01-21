@@ -21,7 +21,7 @@ async def barcode_input_handler(update: Update, context: ContextTypes.DEFAULT_TY
     is_admin = (user_id == ADMIN_ID)
     text = update.message.text.strip()
 
-    if text == "Orqaga":
+    if text.lower() == "orqaga":
         await update.message.reply_text(
             "Asosiy menyuga qaytildi.",
             reply_markup=main_menu_keyboard(is_admin=is_admin)
@@ -38,16 +38,25 @@ async def barcode_input_handler(update: Update, context: ContextTypes.DEFAULT_TY
     barcode = int(text)
     product = get_product_by_barcode(barcode)
     if product:
-        # предполагается, что возвращается словарь
         context.user_data['barcode'] = barcode
-        context.user_data['product_name'] = product['name']  # используем ключ 'name'
+        context.user_data['product_name'] = product['name']
 
-        await update.message.reply_text(
-            f"Mahsulot topildi: {product['name']}\n"
-            "Narxni (USD) kiriting yoki Orqaga bosing:",
-            reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
-        )
-        return States.PRICE_INPUT
+        if product.get('weight') is None:
+            # Weight is null, prompt for weight first
+            await update.message.reply_text(
+                f"Mahsulot topildi: {product['name']}\n"
+                "Og'irlikni (weight) kiriting (masalan, 1.0 yoki 0.5):",
+                reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
+            )
+            return States.WEIGHT_INPUT
+        else:
+            # Weight exists, prompt directly for price
+            await update.message.reply_text(
+                f"Mahsulot topildi: {product['name']}\n"
+                "Narxni (USD) kiriting yoki Orqaga bosing:",
+                reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
+            )
+            return States.PRICE_INPUT
     else:
         await update.message.reply_text(
             "Bunday barkod topilmadi. Qayta kiritish yoki Orqaga bosing.",
@@ -55,44 +64,12 @@ async def barcode_input_handler(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return States.BARCODE_INPUT
 
-
-async def price_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    user_id = update.message.from_user.id
-    is_admin = (user_id == ADMIN_ID)
-
-    if text == "Orqaga":
-        await update.message.reply_text(
-            "Asosiy menyuga qaytildi.",
-            reply_markup=main_menu_keyboard(is_admin=is_admin)
-        )
-        return States.MAIN_MENU
-
-    try:
-        usd_price = float(text)
-    except ValueError:
-        await update.message.reply_text(
-            "Iltimos, to'g'ri narx kiriting yoki Orqaga:",
-            reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
-        )
-        return States.PRICE_INPUT
-
-    context.user_data['usd_price'] = usd_price
-
-    # Endi weight so'raymiz
-    await update.message.reply_text(
-        "Mahsulot og'irligini (weight) kiriting (masalan, 1.0 yoki 0.5):",
-        reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
-    )
-    return States.WEIGHT_INPUT
-
-
 async def weight_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.message.from_user.id
     is_admin = (user_id == ADMIN_ID)
 
-    if text == "Orqaga":
+    if text.lower() == "orqaga":
         await update.message.reply_text(
             "Asosiy menyuga qaytildi.",
             reply_markup=main_menu_keyboard(is_admin=is_admin)
@@ -101,35 +78,87 @@ async def weight_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     try:
         weight_val = float(text)
+        if weight_val <= 0:
+            raise ValueError("Weight must be positive.")
     except ValueError:
         await update.message.reply_text(
-            "Iltimos, to'g'ri og'irlik kiriting yoki Orqaga:",
+            "Iltimos, to'g'ri og'irlik kiriting yoki Orqaga bosing:",
             reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
         )
         return States.WEIGHT_INPUT
 
-    # Ma'lumotlarni olamiz
-    barcode = context.user_data.get('barcode')
-    usd_price = context.user_data.get('usd_price')
-    product_name = context.user_data.get('product_name')
+    context.user_data['usd_price'] = None  # Reset in case of re-entry
+    context.user_data['weight_val'] = weight_val
 
-    # final_price hisoblaymiz
-    exchange_rate = get_exchange_rate()
-    final_price = round((usd_price + 13.5 * weight_val) * exchange_rate,0)
-  # sizning formula
-    # Agar formula murakkab bo‘lsa, shu yerda qo‘shing: masalan, final_price = (usd_price + 13.5 * weight_val)*exchange_rate
-
-    # DB ga saqlaymiz
-    update_weight_price_finalprice(
-        barcode=barcode,
-        weight=weight_val,
-        price=usd_price,
-        final_price=final_price
+    # Prompt for price next
+    await update.message.reply_text(
+        "Narxni (USD) kiriting yoki Orqaga bosing:",
+        reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
     )
+    return States.PRICE_INPUT
+
+
+
+
+
+async def price_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user_id = update.message.from_user.id
+    is_admin = (user_id == ADMIN_ID)
+
+    if text.lower() == "orqaga":
+        await update.message.reply_text(
+            "Asosiy menyuga qaytildi.",
+            reply_markup=main_menu_keyboard(is_admin=is_admin)
+        )
+        return States.MAIN_MENU
+
+    try:
+        usd_price = float(text)
+        if usd_price < 0:
+            raise ValueError("Price cannot be negative.")
+    except ValueError:
+        await update.message.reply_text(
+            "Iltimos, to'g'ri narx kiriting yoki Orqaga bosing:",
+            reply_markup=ReplyKeyboardMarkup([["Orqaga"]], resize_keyboard=True)
+        )
+        return States.PRICE_INPUT
+
+    context.user_data['usd_price'] = usd_price
+
+    # If weight was not previously set (i.e., user didn't input weight), keep it as is
+    weight_val = context.user_data.get('weight_val')
+
+    # Fetch barcode from context.user_data
+    barcode = context.user_data.get('barcode')
+    if weight_val is None:
+        if barcode is None:
+            await update.message.reply_text(
+                "Xatolik: mahsulot barkodi topilmadi. Iltimos, yangi mahsulotni qo'shishni boshlang.",
+                reply_markup=main_menu_keyboard(is_admin=is_admin),
+            )
+            return States.MAIN_MENU
+
+        # Fetch existing weight from the database
+        product = get_product_by_barcode(barcode)
+        weight_val = product.get('weight') if product else 0.0
+
+    # Calculate final_price
+    exchange_rate = get_exchange_rate()
+    final_price = round((usd_price + 13.5 * weight_val) * exchange_rate, 0)
+
+    # Update the product in the database
+    if barcode:  # Ensure barcode is valid before updating the database
+        update_weight_price_finalprice(
+            barcode=barcode,
+            weight=weight_val,
+            price=usd_price,
+            final_price=final_price
+        )
 
     final_price_rounded = round(final_price, 2)
     await update.message.reply_text(
-        f"Nomi: {product_name}\n"
+        f"Nomi: {context.user_data.get('product_name')}\n"
         f"Barkod: {barcode}\n"
         f"Price (USD): {usd_price}\n"
         f"Weight: {weight_val}\n"
@@ -140,6 +169,7 @@ async def weight_input_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=price_done_inline_keyboard()
     )
     return States.PRICE_DONE
+
 
 
 async def price_done_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

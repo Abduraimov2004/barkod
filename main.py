@@ -85,11 +85,11 @@ def main():
             States.BARCODE_INPUT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, barcode_input_handler),
             ],
-            States.PRICE_INPUT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, price_input_handler),
-            ],
             States.WEIGHT_INPUT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, weight_input_handler),
+            ],
+            States.PRICE_INPUT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, price_input_handler),
             ],
             States.PRICE_DONE: [
                 CallbackQueryHandler(price_done_callback_handler, pattern='^(add_more|back)$')
